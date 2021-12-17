@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from torch.distributions.normal import Normal
 from torch.distributions.categorical import Categorical
+from gym.spaces import Box, Discrete
 
 def init_mlp(sizes, activations):
     '''
@@ -70,10 +71,10 @@ class MLPCategoricalActor(Actor):
         # Final output should match the action space
         # All the hidden layers will be inbetween
         sizes = [obs_dim] + list(hidden_dims) + act_dim
-        self.mlp = init_mlp(sizes, activations)
+        self.logits_net = init_mlp(sizes, activations)
 
     def _distribution(self, obs):
-        logits = self.mlp(obs)
+        logits = self.logits_nets(obs)
         return Categorical(logits=logits)
     
     def _log_prob_from_distribution(self, pi, actions):
@@ -121,7 +122,40 @@ class MLPGaussianDynamicVarianceActor(Actor):
     def _log_prob_from_distribution(self, pi, actions):
         return pi.log_prob(actions)
 
-class Critic(nn.Module):
-    pass
+class MLPCritic(nn.Module):
+    def __init__(self, obs_dim, hidden_dims, activations):
+        super().__init__()
+        sizes = [obs_dim] + list(hidden_dims) + [1]
+        self.value_net = init_mlp(sizes, activations)
 
+    def forward(self, obs):
+        return self.value_net(obs)
 
+class MLPActorCritic(nn.Module):
+    def __init__(self, observation_space, action_space, hidden_sizes, activations):
+        super().__init__()
+
+        assert len(observation_space) == 1, 'the observation space should be a singleton'
+        obs_dim = observation_space.shape[0]
+
+        assert len(action_space) == 1, 'the actions space should be a singleton'
+        act_dim= action_space.shape[0]
+
+        if isinstance(action_space, Box):
+            self.policy = MLPGaussianFixedVarianceActor(obs_dim, act_dim, hidden_sizes, activations)
+        elif isinstance(action_space, Discrete):
+            self.policy = MLPCategoricalActor(obs_dim, act_dim, hidden_sizes, activations)
+        
+        self.value_function = MLPCritic(obs_dim, hidden_sizes, activations)
+
+    def step(self, obs):
+        with torch.no_grad():
+            action_distribution = self.policy._distribution(obs)
+            action = action_distribution.sample()
+            logp_a = self.policy._log_prob_from_distribution(action_distribution, action)
+            value = self.value_function(obs)
+
+        return action, value, logp_a
+    
+    def act(self, obs):
+        return self.step(obs)[0]
