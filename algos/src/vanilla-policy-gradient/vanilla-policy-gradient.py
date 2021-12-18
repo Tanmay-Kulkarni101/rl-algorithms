@@ -1,7 +1,9 @@
 import torch
+import argparse
+import gym
 from torch.optim import Adam
 from time import time
-from vanilla_policy_gradient_utils import cumulative_sum
+from vanilla_policy_gradient_utils import cumulative_sum, MLPActorCritic
 
 class PlayBackBuffer:
     def __init__(self, gamma, lamb, size, obs_dim, act_dim):
@@ -200,3 +202,37 @@ class VanillaPolicyGradient:
                     
                 # Update Model Params
                 self.update()
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--env', type=str)
+    parser.add_argument('--hidden_sizes', nargs='+', type=int)
+    parser.add_argument('--gamma', type=float)
+    parser.add_argument('--seed', type=int)
+    parser.add_argument('--steps', type=int)
+    parser.add_argument('--epochs', type=int)
+    parser.add_argument('--pi_lr', type=float)
+    parser.add_argument('--v_lr', type=float)
+    parser.add_argument('--value_func_iters', type=int)
+    parser.add_argument('--lamb', type=float)
+    parser.add_argument('--max_episode_length', type=int)
+
+    args = parser.parse_args()
+
+    env = gym.make(args.env)
+    actor_critic = MLPActorCritic
+    hidden_sizes = args.hidden_sizes
+    gamma = args.gamma
+    seed = args.seed
+    steps_per_epoch = args.steps
+    epochs = args.epochs
+    pi_lr = args.pi_lr
+    v_lr = args.v_lr
+    value_func_iters = args.value_func_iters
+    lamb = args.lamb
+    max_ep_len = args.max_episode_length
+
+    algo = VanillaPolicyGradient(env, actor_critic, dict(hidden_sizes=hidden_sizes),
+    gamma, steps_per_epoch, epochs, gamma, pi_lr, v_lr, value_func_iters, lamb, max_ep_len)
+
+    algo.train()
