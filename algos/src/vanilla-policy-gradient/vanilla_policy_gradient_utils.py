@@ -1,8 +1,22 @@
 import torch
+import pdb
 import torch.nn as nn
 from torch.distributions.normal import Normal
 from torch.distributions.categorical import Categorical
 from gym.spaces import Box, Discrete
+
+def str_to_activation(activations):
+    torch_activations = []
+
+    for activation in activations:
+        if activation.lower() == 'tanh':
+            torch_activations.append(nn.Tanh)
+        elif activation.lower() == 'relu':
+            torch_activations.append(nn.ReLU)
+        else:
+            raise NotImplementedError
+    
+    return torch_activations
 
 def init_mlp(sizes, activations):
     '''
@@ -16,7 +30,7 @@ def init_mlp(sizes, activations):
     The length of sizes and activations should be the same
     '''
 
-    assert len(sizes) == len(activations), 'sizes and activations should have the same length'
+    assert len(sizes) - 1 == len(activations), f'sizes - 1 {len(sizes) - 1} and activations {len(activations)} should have the same length'
     
     layers = []
     num_sizes = len(sizes)
@@ -29,8 +43,8 @@ def init_mlp(sizes, activations):
         output_size = sizes[curr_size + 1]
         activation = activations[curr_activation]
 
-        layer = nn.Linear(input_size, output_size, activation)
-        layers.append(layer)
+        layer = [nn.Linear(input_size, output_size), activation()]
+        layers += layer
 
         curr_size += 1
         curr_activation += 1
@@ -79,11 +93,11 @@ class MLPCategoricalActor(Actor):
         # Input will the same dim as the observation space
         # Final output should match the action space
         # All the hidden layers will be inbetween
-        sizes = [obs_dim] + list(hidden_dims) + act_dim
+        sizes = [obs_dim] + list(hidden_dims) + [act_dim]
         self.logits_net = init_mlp(sizes, activations)
 
     def _distribution(self, obs):
-        logits = self.logits_nets(obs)
+        logits = self.logits_net(obs)
         return Categorical(logits=logits)
     
     def _log_prob_from_distribution(self, pi, actions):
@@ -151,15 +165,15 @@ class MLPActorCritic(nn.Module):
     def __init__(self, observation_space, action_space, hidden_sizes, activations):
         super().__init__()
 
-        assert len(observation_space) == 1, 'the observation space should be a singleton tuple'
+        assert len(observation_space.shape) == 1, 'the observation space should be a singleton tuple'
         obs_dim = observation_space.shape[0]
 
-        assert len(action_space) == 1, 'the actions space should be a singleton tuple'
-        act_dim= action_space.shape[0]
-
         if isinstance(action_space, Box):
+            assert len(action_space.shape) == 1, 'the actions space should be a singleton tuple'
+            act_dim = action_space.shape[0]
             self.policy = MLPGaussianFixedVarianceActor(obs_dim, act_dim, hidden_sizes, activations)
         elif isinstance(action_space, Discrete):
+            act_dim = action_space.n 
             self.policy = MLPCategoricalActor(obs_dim, act_dim, hidden_sizes, activations)
         
         self.value_function = MLPCritic(obs_dim, hidden_sizes, activations)

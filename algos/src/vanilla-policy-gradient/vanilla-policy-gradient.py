@@ -1,9 +1,10 @@
+import pdb
 import torch
 import argparse
 import gym
 from torch.optim import Adam
 from time import time
-from vanilla_policy_gradient_utils import cumulative_sum, MLPActorCritic
+from vanilla_policy_gradient_utils import cumulative_sum, MLPActorCritic, str_to_activation
 
 class PlayBackBuffer:
     def __init__(self, gamma, lamb, size, obs_dim, act_dim):
@@ -19,6 +20,8 @@ class PlayBackBuffer:
         self.reward_buffer = torch.zeros(size)
         self.value_buffer = torch.zeros(size)
         self.log_prob_buffer = torch.zeros(size)
+        self.advantage_buffer = torch.zeros(size)
+        self.returns_buffer = torch.zeros(size)
 
 
     def store(self, observation, action, reward, value, log_prob):
@@ -33,7 +36,7 @@ class PlayBackBuffer:
         self.value_buffer[self.curr] = value
         self.log_prob_buffer[self.curr] = log_prob
 
-        self.ptr += 1
+        self.curr += 1
 
     def terminate_trajectory(self, terminal_value):
         '''
@@ -53,10 +56,10 @@ class PlayBackBuffer:
 
         # Calculate the advantages
         delta = rewards[:-1] + self.gamma * values[1:] - values[:-1]
-        self.advantage_buffer = cumulative_sum(delta, self.gamma * self.lamb)
+        self.advantage_buffer[trajectory] = cumulative_sum(delta, self.gamma * self.lamb)
 
         # Calculate the returns
-        self.returns_buffer = cumulative_sum(rewards, self.gamma)
+        self.returns_buffer[trajectory] = cumulative_sum(rewards, self.gamma)[:-1]
 
         self.trajectory_start = self.curr
     
@@ -83,14 +86,14 @@ class PlayBackBuffer:
         return data
 
 class VanillaPolicyGradient:
-        def __init__(self, env_func, actor_critic, ac_kwargs, seed, steps_per_epoch, 
-        epochs, gamma, pi_lr, vf_lr, train_v_iters, lamb, max_ep_len, save_freq):
+        def __init__(self, env, actor_critic, ac_kwargs, seed, steps_per_epoch, 
+        epochs, gamma, pi_lr, vf_lr, train_v_iters, lamb, max_ep_len):
             torch.manual_seed(seed)
 
             self.train_v_iters = train_v_iters
 
             # Instantiate the environment
-            self.env = env_func()
+            self.env = env
             obs_dim = self.env.observation_space.shape
             act_dim = self.env.action_space.shape
 
@@ -165,15 +168,22 @@ class VanillaPolicyGradient:
             episode_return = 0
             episode_length = 0
 
-            for epoch in self.epochs:
+            for epoch in range(self.epochs):
                 print("########################################################")
                 print(f"Epoch:{epoch}")
-                for time_step in self.steps_per_epoch:
+                for time_step in range(self.steps_per_epoch):
                     action, value, logp_a = self.ac.step(torch.as_tensor(observation))
+
+                    action = action.numpy()
 
                     next_observation, reward, done, _ = self.env.step(action)
                     episode_return += reward
                     episode_length += 1
+
+                    # Convert to torch tensor form ndarray
+                    action = torch.tensor(action)
+                    observation = torch.tensor(observation)
+                    reward = torch.tensor(reward)
 
                     self.buffer.store(observation, action, reward, value, logp_a)
 
@@ -187,8 +197,10 @@ class VanillaPolicyGradient:
 
                     if is_term or is_epoch_end:
                         if is_epoch_end and not is_term:
-                            print(f"Trajectory cut short after {episode_length} steps")
+                            print(f"Trajectory cut short after {episode_length} steps")                            
                         if is_timeout or is_epoch_end:
+                            # Convert the last observation to a tensor
+                            observation = torch.tensor(observation)
                             value = self.ac.step(observation)[1]
                         else:
                             value = 0
@@ -199,6 +211,10 @@ class VanillaPolicyGradient:
                             print(f'Episode Terminated')
                             print(f'Episode Return:{episode_return}')
                             print(f'Episode Length:{episode_length}')
+                        
+                        observation = self.env.reset()
+                        episode_return = 0
+                        episode_length = 0
                     
                 # Update Model Params
                 self.update()
@@ -207,6 +223,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--env', type=str)
     parser.add_argument('--hidden_sizes', nargs='+', type=int)
+    parser.add_argument('--activations', nargs='+', type=str)
     parser.add_argument('--gamma', type=float)
     parser.add_argument('--seed', type=int)
     parser.add_argument('--steps', type=int)
@@ -222,6 +239,10 @@ if __name__ == '__main__':
     env = gym.make(args.env)
     actor_critic = MLPActorCritic
     hidden_sizes = args.hidden_sizes
+
+    activations = args.activations
+    activations = str_to_activation(activations)
+    
     gamma = args.gamma
     seed = args.seed
     steps_per_epoch = args.steps
@@ -232,7 +253,7 @@ if __name__ == '__main__':
     lamb = args.lamb
     max_ep_len = args.max_episode_length
 
-    algo = VanillaPolicyGradient(env, actor_critic, dict(hidden_sizes=hidden_sizes),
+    algo = VanillaPolicyGradient(env, actor_critic, dict(hidden_sizes=hidden_sizes, activations=activations),
     gamma, steps_per_epoch, epochs, gamma, pi_lr, v_lr, value_func_iters, lamb, max_ep_len)
 
     algo.train()
