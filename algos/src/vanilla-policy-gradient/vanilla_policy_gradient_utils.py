@@ -48,15 +48,15 @@ def init_mlp(sizes, activations):
 
         curr_size += 1
         curr_activation += 1
-    
+
     return nn.Sequential(*layers)
 
 def cumulative_sum(array, discount_factor):
     discounted_sum = torch.zeros_like(array)
-    discounted_sum[0] = array[0]
+    discounted_sum[-1] = array[-1]
 
-    for i in range(len(array)):
-        discounted_sum[i] = discount_factor * discounted_sum[i - 1] + array[i]
+    for i in reversed(range(1, len(array))):
+        discounted_sum[i - 1] = discount_factor * discounted_sum[i] + array[i - 1]
     
     return discounted_sum
     
