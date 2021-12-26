@@ -86,138 +86,145 @@ class PlayBackBuffer:
         return data
 
 class VanillaPolicyGradient:
-        def __init__(self, env, actor_critic, ac_kwargs, seed, steps_per_epoch, 
+    def __init__(self, env, actor_critic, ac_kwargs, seed, steps_per_epoch, 
         epochs, gamma, pi_lr, vf_lr, train_v_iters, lamb, max_ep_len):
-            torch.manual_seed(seed)
+        torch.manual_seed(seed)
 
-            self.train_v_iters = train_v_iters
+        self.train_v_iters = train_v_iters
 
-            # Instantiate the environment
-            self.env = env
-            obs_dim = self.env.observation_space.shape
-            act_dim = self.env.action_space.shape
+        # Instantiate the environment
+        self.env = env
+        obs_dim = self.env.observation_space.shape
+        act_dim = self.env.action_space.shape
 
-            # Instantiate Actor Critic
-            self.ac = actor_critic(self.env.observation_space, self.env.action_space, **ac_kwargs) 
+        # Instantiate Actor Critic
+        self.ac = actor_critic(self.env.observation_space, self.env.action_space, **ac_kwargs) 
 
-            # Instantiate Buffer
-            self.buffer = PlayBackBuffer(gamma, lamb, steps_per_epoch, obs_dim, act_dim)
+        # Instantiate Buffer
+        self.buffer = PlayBackBuffer(gamma, lamb, steps_per_epoch, obs_dim, act_dim)
 
-            # Initialize Optimizer
-            self.policy_optimizer = Adam(self.ac.policy.parameters(), lr=pi_lr)
-            self.value_func_optimizer = Adam(self.ac.value_function.parameters(), lr=vf_lr)
+        # Initialize Optimizer
+        self.policy_optimizer = Adam(self.ac.policy.parameters(), lr=pi_lr)
+        self.value_func_optimizer = Adam(self.ac.value_function.parameters(), lr=vf_lr)
 
-            # Experiment Parameters
-            self.epochs = epochs
-            self.steps_per_epoch = steps_per_epoch
-            self.max_ep_len = max_ep_len
+        # Experiment Parameters
+        self.epochs = epochs
+        self.steps_per_epoch = steps_per_epoch
+        self.max_ep_len = max_ep_len
 
-        def compute_policy_loss(self, obs, act, adv, log_prob):
-            action_distribution, new_log_prob = self.ac.policy(obs, act)
-            policy_loss = - (new_log_prob * adv).mean()
+    def compute_policy_loss(self, obs, act, adv, log_prob):
+        action_distribution, new_log_prob = self.ac.policy(obs, act)
+        policy_loss = - (new_log_prob * adv).mean()
 
-            # Additional Information
-            # p log p / q = p log p - p log q
-            approx_kl = (log_prob - new_log_prob).mean()
-            entropy = action_distribution.entropy().mean()
-            action_distribution_info = dict(kl=approx_kl, entropy = entropy)
-
-            return policy_loss, action_distribution_info
+        # Additional Information
+        # p log p / q = p log p - p log q
+        approx_kl = (log_prob - new_log_prob).mean()
         
-        def compute_value_func_loss(self, obs, returns):
-            return ((self.ac.value_function(obs) - returns) ** 2).mean()
+        entropy = action_distribution.entropy().mean()
+        action_distribution_info = dict(kl=approx_kl, entropy = entropy)
+
+        return policy_loss, action_distribution_info
         
-        def update(self):
-            '''
-            Update Model Paramters
-            '''
-            data = self.buffer.get()
+    def compute_value_func_loss(self, obs, returns):
+        return ((self.ac.value_function(obs) - returns) ** 2).mean()
+    
+    def update(self):
+        '''
+        Update Model Paramters
+        '''
+        data = self.buffer.get()
 
-            # Expand members of dict
-            obs = data['obs']
-            actions = data['act']
-            returns = data['ret']
-            advantages = data['adv']
-            logp = data['logp']
+        # Expand members of dict
+        obs = data['obs']
+        actions = data['act']
+        returns = data['ret']
+        advantages = data['adv']
+        logp = data['logp']
 
-            # Update Policy Paramters
-            self.policy_optimizer.zero_grad()
-            policy_loss, _ = self.compute_policy_loss(obs, actions, advantages, logp)
-            print(f'Policy Loss: {policy_loss}')
+        # Update Policy Paramters
+        self.policy_optimizer.zero_grad()
+        policy_loss, _ = self.compute_policy_loss(obs, actions, advantages, logp)
+        print(f'Policy Loss: {policy_loss}')
 
-            policy_loss.backward()
-            self.policy_optimizer.step()
+        policy_loss.backward()
+        self.policy_optimizer.step()
 
-            value_func_loss_avg = 0
-            # Update Value Function Paramters
-            for i in range(self.train_v_iters):
-                self.value_func_optimizer.zero_grad()
-                value_func_loss = self.compute_value_func_loss(obs, returns)
-                value_func_loss_avg += value_func_loss
-                value_func_loss.backward()
-                self.value_func_optimizer.step()
-            
-            print(f'Value Function Loss:{value_func_loss_avg}')
+        value_func_loss_avg = 0
+        # Update Value Function Paramters
+        for i in range(self.train_v_iters):
+            self.value_func_optimizer.zero_grad()
+            value_func_loss = self.compute_value_func_loss(obs, returns)
+            value_func_loss_avg += value_func_loss
+            value_func_loss.backward()
+            self.value_func_optimizer.step()
+        
+        print(f'Value Function Loss:{value_func_loss_avg}')
 
 
-        def train(self):
-            '''
-            '''
-            start_time = time()
-            observation = self.env.reset()
-            episode_return = 0
-            episode_length = 0
+    def train(self):
+        '''
+        '''
+        start_time = time()
+        observation = self.env.reset()
+        episode_return = 0
+        episode_length = 0
 
-            for epoch in range(self.epochs):
-                print("########################################################")
-                print(f"Epoch:{epoch}")
-                for time_step in range(self.steps_per_epoch):
-                    action, value, logp_a = self.ac.step(torch.as_tensor(observation))
+        for epoch in range(self.epochs):
+            print("########################################################")
+            print(f"Epoch:{epoch}")
+            avg_return = 0
+            episode_count = 0
+            for time_step in range(self.steps_per_epoch):
+                action, value, logp_a = self.ac.step(torch.as_tensor(observation))
 
-                    action = action.numpy()
+                action = action.numpy()
 
-                    next_observation, reward, done, _ = self.env.step(action)
-                    episode_return += reward
-                    episode_length += 1
+                next_observation, reward, done, _ = self.env.step(action)
+                episode_return += reward
+                episode_length += 1
 
-                    # Convert to torch tensor form ndarray
-                    action = torch.tensor(action)
-                    observation = torch.tensor(observation)
-                    reward = torch.tensor(reward)
+                # Convert to torch tensor form ndarray
+                action = torch.tensor(action)
+                observation = torch.tensor(observation)
+                reward = torch.tensor(reward)
 
-                    self.buffer.store(observation, action, reward, value, logp_a)
+                self.buffer.store(observation, action, reward, value, logp_a)
 
-                    # Update current observation
-                    observation = next_observation
+                # Update current observation
+                observation = next_observation
 
-                    # Terminal Conditions
-                    is_timeout = episode_length == self.max_ep_len - 1
-                    is_term = is_timeout or done
-                    is_epoch_end = time_step == self.steps_per_epoch - 1
+                # Terminal Conditions
+                is_timeout = episode_length == self.max_ep_len - 1
+                is_term = is_timeout or done
+                is_epoch_end = time_step == self.steps_per_epoch - 1
 
-                    if is_term or is_epoch_end:
-                        if is_epoch_end and not is_term:
-                            print(f"Trajectory cut short after {episode_length} steps")                            
-                        if is_timeout or is_epoch_end:
-                            # Convert the last observation to a tensor
-                            observation = torch.tensor(observation)
-                            value = self.ac.step(observation)[1]
-                        else:
-                            value = 0
-                        
-                        self.buffer.terminate_trajectory(value)
-
-                        if is_term:
-                            print(f'Episode Terminated')
-                            print(f'Episode Return:{episode_return}')
-                            print(f'Episode Length:{episode_length}')
-                        
-                        observation = self.env.reset()
-                        episode_return = 0
-                        episode_length = 0
+                if is_term or is_epoch_end:
+                    if is_epoch_end and not is_term:
+                        print(f"Trajectory cut short after {episode_length} steps")                            
+                    if is_timeout or is_epoch_end:
+                        # Convert the last observation to a tensor
+                        observation = torch.tensor(observation)
+                        value = self.ac.step(observation)[1]
+                    else:
+                        value = 0
                     
-                # Update Model Params
-                self.update()
+                    self.buffer.terminate_trajectory(value)
+
+                    if is_term:
+                        # print(f'Episode Terminated')
+                        # print(f'Episode Return:{episode_return}')
+                        # print(f'Episode Length:{episode_length}')
+                        avg_return += episode_return
+                        episode_count += 1
+                    
+                    observation = self.env.reset()
+                    episode_return = 0
+                    episode_length = 0
+            
+            # Update Model Params
+            self.update()
+            print(f'Average Returns: {avg_return / episode_count}')
+            print(f'Episode Count: {episode_count}')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
