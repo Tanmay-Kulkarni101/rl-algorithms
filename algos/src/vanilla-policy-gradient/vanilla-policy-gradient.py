@@ -5,7 +5,7 @@ import gym
 import logging
 from torch.optim import Adam
 from time import time
-from vanilla_policy_gradient_utils import cumulative_sum, MLPActorCritic, str_to_activation
+from vanilla_policy_gradient_utils import cumulative_sum, MLPActorCritic, str_to_activation, str_to_log_level
 
 class PlayBackBuffer:
     def __init__(self, gamma, lamb, size, obs_dim, act_dim):
@@ -113,8 +113,8 @@ class VanillaPolicyGradient:
         self.steps_per_epoch = steps_per_epoch
         self.max_ep_len = max_ep_len
 
+        logging.basicConfig(level=log_level)
         self.logger = logging.getLogger(__name__)
-        self.logger.basicConfig(log_level)
 
     def compute_policy_loss(self, obs, act, adv, log_prob):
         action_distribution, new_log_prob = self.ac.policy(obs, act)
@@ -264,7 +264,7 @@ if __name__ == '__main__':
     value_func_iters = args.value_func_iters
     lamb = args.lamb
     max_ep_len = args.max_episode_length
-    log_level = args.log_level
+    log_level = str_to_log_level(args.log_level)
 
     algo = VanillaPolicyGradient(env, actor_critic, dict(hidden_sizes=hidden_sizes, activations=activations),
     gamma, steps_per_epoch, epochs, gamma, pi_lr, v_lr, value_func_iters, lamb, max_ep_len, log_level)

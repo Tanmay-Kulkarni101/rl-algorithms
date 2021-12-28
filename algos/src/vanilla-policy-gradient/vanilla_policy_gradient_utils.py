@@ -1,9 +1,21 @@
 import torch
 import pdb
+import logging
 import torch.nn as nn
 from torch.distributions.normal import Normal
 from torch.distributions.categorical import Categorical
 from gym.spaces import Box, Discrete
+
+def str_to_log_level(level):
+    level = level.lower()
+    if level == 'info':
+        return logging.INFO
+    elif level in ['warn', 'warning']:
+        return logging.WARNING
+    elif level == 'debug':
+        return logging.DEBUG
+    else:
+        raise NotImplementedError
 
 def str_to_activation(activations):
     torch_activations = []
