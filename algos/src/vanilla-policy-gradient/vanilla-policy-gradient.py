@@ -2,9 +2,10 @@ import pdb
 import torch
 import argparse
 import gym
+import logging
 from torch.optim import Adam
 from time import time
-from vanilla_policy_gradient_utils import cumulative_sum, MLPActorCritic, str_to_activation
+from vanilla_policy_gradient_utils import cumulative_sum, MLPActorCritic, str_to_activation, str_to_log_level
 
 class PlayBackBuffer:
     def __init__(self, gamma, lamb, size, obs_dim, act_dim):
@@ -87,7 +88,7 @@ class PlayBackBuffer:
 
 class VanillaPolicyGradient:
     def __init__(self, env, actor_critic, ac_kwargs, seed, steps_per_epoch, 
-        epochs, gamma, pi_lr, vf_lr, train_v_iters, lamb, max_ep_len):
+        epochs, gamma, pi_lr, vf_lr, train_v_iters, lamb, max_ep_len, log_level):
         torch.manual_seed(seed)
 
         self.train_v_iters = train_v_iters
@@ -111,6 +112,9 @@ class VanillaPolicyGradient:
         self.epochs = epochs
         self.steps_per_epoch = steps_per_epoch
         self.max_ep_len = max_ep_len
+
+        logging.basicConfig(level=log_level)
+        self.logger = logging.getLogger(__name__)
 
     def compute_policy_loss(self, obs, act, adv, log_prob):
         action_distribution, new_log_prob = self.ac.policy(obs, act)
@@ -144,7 +148,7 @@ class VanillaPolicyGradient:
         # Update Policy Paramters
         self.policy_optimizer.zero_grad()
         policy_loss, _ = self.compute_policy_loss(obs, actions, advantages, logp)
-        print(f'Policy Loss: {policy_loss}')
+        self.logger.debug(f'Policy Loss: {policy_loss}')
 
         policy_loss.backward()
         self.policy_optimizer.step()
@@ -158,7 +162,7 @@ class VanillaPolicyGradient:
             value_func_loss.backward()
             self.value_func_optimizer.step()
         
-        print(f'Value Function Loss:{value_func_loss_avg}')
+        self.logger.debug(f'Value Function Loss:{value_func_loss_avg}')
 
 
     def train(self):
@@ -170,8 +174,8 @@ class VanillaPolicyGradient:
         episode_length = 0
 
         for epoch in range(self.epochs):
-            print("########################################################")
-            print(f"Epoch:{epoch}")
+            self.logger.info("########################################################")
+            self.logger.info(f"Epoch:{epoch}")
             avg_return = 0
             episode_count = 0
             for time_step in range(self.steps_per_epoch):
@@ -200,7 +204,7 @@ class VanillaPolicyGradient:
 
                 if is_term or is_epoch_end:
                     if is_epoch_end and not is_term:
-                        print(f"Trajectory cut short after {episode_length} steps")                            
+                        self.logger.warning(f"Trajectory cut short after {episode_length} steps")                            
                     if is_timeout or is_epoch_end:
                         # Convert the last observation to a tensor
                         observation = torch.tensor(observation)
@@ -211,9 +215,9 @@ class VanillaPolicyGradient:
                     self.buffer.terminate_trajectory(value)
 
                     if is_term:
-                        # print(f'Episode Terminated')
-                        # print(f'Episode Return:{episode_return}')
-                        # print(f'Episode Length:{episode_length}')
+                        self.logger.debug(f'Episode Terminated')
+                        self.logger.debug(f'Episode Return:{episode_return}')
+                        self.logger.debug(f'Episode Length:{episode_length}')
                         avg_return += episode_return
                         episode_count += 1
                     
@@ -223,8 +227,8 @@ class VanillaPolicyGradient:
             
             # Update Model Params
             self.update()
-            print(f'Average Returns: {avg_return / episode_count}')
-            print(f'Episode Count: {episode_count}')
+            self.logger.info(f'Average Returns: {avg_return / episode_count}')
+            self.logger.info(f'Episode Count: {episode_count}')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -240,6 +244,7 @@ if __name__ == '__main__':
     parser.add_argument('--value_func_iters', type=int)
     parser.add_argument('--lamb', type=float)
     parser.add_argument('--max_episode_length', type=int)
+    parser.add_argument('--log_level', type=str)
 
     args = parser.parse_args()
 
@@ -259,8 +264,9 @@ if __name__ == '__main__':
     value_func_iters = args.value_func_iters
     lamb = args.lamb
     max_ep_len = args.max_episode_length
+    log_level = str_to_log_level(args.log_level)
 
     algo = VanillaPolicyGradient(env, actor_critic, dict(hidden_sizes=hidden_sizes, activations=activations),
-    gamma, steps_per_epoch, epochs, gamma, pi_lr, v_lr, value_func_iters, lamb, max_ep_len)
+    gamma, steps_per_epoch, epochs, gamma, pi_lr, v_lr, value_func_iters, lamb, max_ep_len, log_level)
 
     algo.train()

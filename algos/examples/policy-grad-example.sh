@@ -10,4 +10,5 @@ python ../src/vanilla-policy-gradient/vanilla-policy-gradient.py \
 --v_lr 1e-2 \
 --value_func_iters 80 \
 --lamb 0.97 \
---max_episode_length 1000
+--max_episode_length 1000 \
+--log_level info
