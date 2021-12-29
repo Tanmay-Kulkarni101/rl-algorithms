@@ -27,4 +27,8 @@ class ModelUtils:
         checkpoints.sort()
         
         if checkpoint_index >= self.count:
-            pass
+            self.logger.warning('Checkpoint out of bounds, taking the latest one')
+            checkpoint_index = checkpoint_index[-1]
+        
+        checkpoint = checkpoints[checkpoint_index]
+        self.model.load_state_dict(checkpoint)
