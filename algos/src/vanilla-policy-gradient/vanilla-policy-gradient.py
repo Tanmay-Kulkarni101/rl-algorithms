@@ -1,10 +1,12 @@
 import pdb
+import sys
 import torch
 import argparse
 import gym
 import logging
 from torch.optim import Adam
 from time import time
+from algos.utils.logging_utils import TabularLogger
 from vanilla_policy_gradient_utils import cumulative_sum, MLPActorCritic, str_to_activation, str_to_log_level
 
 class PlayBackBuffer:
@@ -88,8 +90,12 @@ class PlayBackBuffer:
 
 class VanillaPolicyGradient:
     def __init__(self, env, actor_critic, ac_kwargs, seed, steps_per_epoch, 
-        epochs, gamma, pi_lr, vf_lr, train_v_iters, lamb, max_ep_len, log_level):
+        epochs, gamma, pi_lr, vf_lr, train_v_iters, lamb, max_ep_len, log_level,
+        save_data_path):
+
         torch.manual_seed(seed)
+
+        self.LOG_ATTRIBUTES = ['Epoch Number', 'Episode Number', 'Episode Return']
 
         self.train_v_iters = train_v_iters
 
@@ -113,8 +119,10 @@ class VanillaPolicyGradient:
         self.steps_per_epoch = steps_per_epoch
         self.max_ep_len = max_ep_len
 
+        # Initialize Logging
         logging.basicConfig(level=log_level)
         self.logger = logging.getLogger(__name__)
+        self.tabular_logger = TabularLogger(save_data_path, self.LOG_ATTRIBUTES)
 
     def compute_policy_loss(self, obs, act, adv, log_prob):
         action_distribution, new_log_prob = self.ac.policy(obs, act)
@@ -172,6 +180,7 @@ class VanillaPolicyGradient:
         observation = self.env.reset()
         episode_return = 0
         episode_length = 0
+        total_episode_count = 0
 
         for epoch in range(self.epochs):
             self.logger.info("########################################################")
@@ -215,11 +224,20 @@ class VanillaPolicyGradient:
                     self.buffer.terminate_trajectory(value)
 
                     if is_term:
+                        data = {
+                            'Epoch Number': epoch, 
+                            'Episode Number': total_episode_count, 
+                            'Episode Return': episode_return
+                        }
+
                         self.logger.debug(f'Episode Terminated')
                         self.logger.debug(f'Episode Return:{episode_return}')
                         self.logger.debug(f'Episode Length:{episode_length}')
+                        self.tabular_logger.save_data(data)
+
                         avg_return += episode_return
                         episode_count += 1
+                        total_episode_count += 1
                     
                     observation = self.env.reset()
                     episode_return = 0
@@ -229,6 +247,9 @@ class VanillaPolicyGradient:
             self.update()
             self.logger.info(f'Average Returns: {avg_return / episode_count}')
             self.logger.info(f'Episode Count: {episode_count}')
+
+        # Save the history in disk
+        self.tabular_logger.write_data()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
